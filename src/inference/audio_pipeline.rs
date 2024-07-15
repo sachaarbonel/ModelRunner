@@ -6,14 +6,15 @@ use std::io::Cursor;
 use anyhow::{bail, Result};
 use candle_core::{Device, IndexOp, Tensor, D};
 use candle_nn::ops::softmax;
-use candle_transformers::models::whisper;
-use candle_transformers::models::whisper::quantized_model::Whisper;
+use candle_nn::VarBuilder;
+// use candle_transformers::models::whisper::quantized_model::Whisper;
+use candle_transformers::models::whisper::{self as m, audio, Config};
 use candle_transformers::models::whisper::{
-    audio, Config, COMPRESSION_RATIO_THRESHOLD, EOT_TOKEN, HOP_LENGTH, LOGPROB_THRESHOLD,
-    NO_SPEECH_THRESHOLD, NO_SPEECH_TOKENS, NO_TIMESTAMPS_TOKEN, SAMPLE_RATE, SOT_TOKEN,
-    TEMPERATURES, TRANSCRIBE_TOKEN, TRANSLATE_TOKEN,
+    COMPRESSION_RATIO_THRESHOLD, EOT_TOKEN, HOP_LENGTH, LOGPROB_THRESHOLD, NO_SPEECH_THRESHOLD,
+    NO_SPEECH_TOKENS, NO_TIMESTAMPS_TOKEN, SAMPLE_RATE, SOT_TOKEN, TEMPERATURES, TRANSCRIBE_TOKEN,
+    TRANSLATE_TOKEN,
 };
-use candle_transformers::quantized_var_builder::VarBuilder;
+// use candle_transformers::quantized_var_builder::VarBuilder;
 use hf_hub::api::sync::ApiRepo;
 use rand::distributions::Distribution;
 use serde::{Deserialize, Serialize};
@@ -22,11 +23,13 @@ use tracing::{debug, error};
 
 use crate::inference::pcm_decode::pcm_decode;
 
+use super::common::accelerated_device_if_available;
+
 // Taken from https://github.com/huggingface/candle/blob/main/candle-examples/examples/whisper/main.rs
 
 #[derive(Debug)]
 pub struct AudioGeneratorPipeline {
-    model: Whisper,
+    model: m::model::Whisper,
     tokenizer: Tokenizer,
     config: Config,
     mel_filters: Vec<f32>,
@@ -39,6 +42,7 @@ pub struct AudioGeneratorPipeline {
     no_timestamps_token: u32,
     timestamps: bool,
     seed: rand::rngs::StdRng,
+    device: Device,
 }
 
 impl Clone for AudioGeneratorPipeline {
@@ -58,32 +62,33 @@ impl Clone for AudioGeneratorPipeline {
             no_timestamps_token: self.no_timestamps_token,
             timestamps: self.timestamps,
             seed: self.seed.clone(),
+            device: self.device.clone(),
         }
     }
 }
 
 impl AudioGeneratorPipeline {
+    //normal model
     #[tracing::instrument(level = "trace", skip(repo))]
-    pub fn with_gguf_model(
-        repo: &ApiRepo,
-        config_filename: &str,
-        tokenizer_filename: &str,
-        gguf_filename: &str,
-        mel_filters_filename: &str,
-        timestamps: bool,
-        seed: rand::rngs::StdRng,
-    ) -> Result<Self> {
-        let config_path = repo.get(config_filename)?;
-        let tokenizer_path = repo.get(tokenizer_filename)?;
-        let model_path = repo.get(gguf_filename)?;
+    pub fn with_model(repo: &ApiRepo, timestamps: bool, seed: rand::rngs::StdRng) -> Result<Self> {
+        let device = accelerated_device_if_available()?;
+
+        let config_path = repo.get("config.json")?;
+        let tokenizer_path = repo.get("tokenizer.json")?;
+        let weights_filename = repo.get("model.safetensors")?;
 
         let config: Config = serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
         let tokenizer = Tokenizer::from_file(tokenizer_path).unwrap();
+        // let weights_filename = "model.safetensors";
+        let vb =
+            unsafe { VarBuilder::from_mmaped_safetensors(&[weights_filename], m::DTYPE, &device)? };
+        let model = m::model::Whisper::load(&vb, config.clone())?;
 
-        let vb = VarBuilder::from_gguf(model_path, &Device::Cpu)?;
-        let model = Whisper::load(&vb, config.clone())?;
-
-        let mel_bytes = &*std::fs::read(mel_filters_filename)?;
+        let mel_bytes = match config.num_mel_bins {
+            80 => include_bytes!("melfilters.bytes").as_slice(),
+            128 => include_bytes!("melfilters128.bytes").as_slice(),
+            nmel => anyhow::bail!("unexpected num_mel_bins {nmel}"),
+        };
         let mut mel_filters = vec![0f32; mel_bytes.len() / 4];
         <byteorder::LittleEndian as byteorder::ByteOrder>::read_f32_into(
             mel_bytes,
@@ -102,7 +107,7 @@ impl AudioGeneratorPipeline {
                 }
             })
             .collect();
-        let suppress_tokens = Tensor::new(suppress_tokens.as_slice(), &Device::Cpu)?;
+        let suppress_tokens = Tensor::new(suppress_tokens.as_slice(), &device)?;
         let start_of_transcript_token = token_id(&tokenizer, SOT_TOKEN)?;
         let transcribe_token = token_id(&tokenizer, TRANSCRIBE_TOKEN)?;
         let translate_token = token_id(&tokenizer, TRANSLATE_TOKEN)?;
@@ -129,8 +134,80 @@ impl AudioGeneratorPipeline {
             no_timestamps_token,
             timestamps,
             seed,
+            device,
         })
     }
+
+    // #[tracing::instrument(level = "trace", skip(repo))]
+    // pub fn with_gguf_model(
+    //     repo: &ApiRepo,
+    //     config_filename: &str,
+    //     tokenizer_filename: &str,
+    //     gguf_filename: &str,
+    //     mel_filters_filename: &str,
+    //     timestamps: bool,
+    //     seed: rand::rngs::StdRng,
+    // ) -> Result<Self> {
+    //     let device = accelerated_device_if_available()?;
+    //     let config_path = repo.get(config_filename)?;
+    //     let tokenizer_path = repo.get(tokenizer_filename)?;
+    //     let model_path = repo.get(gguf_filename)?;
+
+    //     let config: Config = serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
+    //     let tokenizer = Tokenizer::from_file(tokenizer_path).unwrap();
+
+    //     let vb = VarBuilder::from_gguf(model_path, &device)?;
+    //     let model = Whisper::load(&vb, config.clone())?;
+
+    //     let mel_bytes = &*std::fs::read(mel_filters_filename)?;
+    //     let mut mel_filters = vec![0f32; mel_bytes.len() / 4];
+    //     <byteorder::LittleEndian as byteorder::ByteOrder>::read_f32_into(
+    //         mel_bytes,
+    //         &mut mel_filters,
+    //     );
+
+    //     let no_timestamps_token = token_id(&tokenizer, NO_TIMESTAMPS_TOKEN)?;
+    //     let suppress_tokens: Vec<f32> = (0..model.config.vocab_size as u32)
+    //         .map(|i| {
+    //             if model.config.suppress_tokens.contains(&i)
+    //                 || timestamps && i == no_timestamps_token
+    //             {
+    //                 f32::NEG_INFINITY
+    //             } else {
+    //                 0f32
+    //             }
+    //         })
+    //         .collect();
+    //     let suppress_tokens = Tensor::new(suppress_tokens.as_slice(), &device)?;
+    //     let start_of_transcript_token = token_id(&tokenizer, SOT_TOKEN)?;
+    //     let transcribe_token = token_id(&tokenizer, TRANSCRIBE_TOKEN)?;
+    //     let translate_token = token_id(&tokenizer, TRANSLATE_TOKEN)?;
+    //     let end_of_text_token = token_id(&tokenizer, EOT_TOKEN)?;
+    //     let no_speech_token = NO_SPEECH_TOKENS
+    //         .iter()
+    //         .find_map(|token| token_id(&tokenizer, token).ok());
+    //     let no_speech_token = match no_speech_token {
+    //         None => bail!("Unable to find any non-speech token"),
+    //         Some(n) => n,
+    //     };
+
+    //     Ok(Self {
+    //         model,
+    //         tokenizer,
+    //         config,
+    //         mel_filters,
+    //         suppress_tokens,
+    //         sot_token: start_of_transcript_token,
+    //         transcribe_token,
+    //         translate_token,
+    //         eot_token: end_of_text_token,
+    //         no_speech_token,
+    //         no_timestamps_token,
+    //         timestamps,
+    //         seed,
+    //         device,
+    //     })
+    // }
 
     #[tracing::instrument(level = "trace", skip(input))]
     pub fn transcribe(&mut self, input: Box<[u8]>, language_token: &str) -> Result<Vec<Segment>> {
@@ -144,7 +221,7 @@ impl AudioGeneratorPipeline {
 
         while seek < content_frames {
             let time_offset = (seek * HOP_LENGTH) as f64 / SAMPLE_RATE as f64;
-            let segment_size = usize::min(content_frames - seek, whisper::N_FRAMES);
+            let segment_size = usize::min(content_frames - seek, m::N_FRAMES);
             let mel_segment = mel.narrow(2, seek, segment_size)?;
             let segment_duration = (segment_size * HOP_LENGTH) as f64 / SAMPLE_RATE as f64;
             let dr = self.decode_with_fallback(&mel_segment, language_token)?;
@@ -287,7 +364,7 @@ impl AudioGeneratorPipeline {
                 self.config.num_mel_bins,
                 mel_len / self.config.num_mel_bins,
             ),
-            &Device::Cpu,
+            &self.device,
         )?;
         debug!("loaded mel: {:?}", mel.dims());
         Ok(mel)

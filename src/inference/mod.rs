@@ -5,3 +5,4 @@ mod pcm_decode;
 pub mod task;
 mod text_pipeline;
 mod token_output_stream;
+mod common;

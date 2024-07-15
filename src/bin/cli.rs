@@ -4,7 +4,7 @@ use clap::Subcommand;
 use sqlx::SqlitePool;
 
 use crate::api::auth::Auth;
-use crate::api::client::{ApiClient, Permission};
+// use crate::api::client::{ApiClient, Permission};
 
 #[allow(dead_code)]
 #[path = "../api/mod.rs"]
@@ -17,26 +17,26 @@ struct Args {
     #[arg(short, long, env, default_value = "model_runner.db")]
     pub sqlite_file_path: String,
 
-    #[command(subcommand)]
-    cmd: Commands,
+    // #[command(subcommand)]
+    // cmd: Commands,
 }
 
-#[derive(Subcommand)]
-enum Commands {
-    GenerateToken {
-        /// Name of the token
-        #[clap(short, long)]
-        name: String,
+// #[derive(Subcommand)]
+// enum Commands {
+//     GenerateToken {
+//         /// Name of the token
+//         #[clap(short, long)]
+//         name: String,
 
-        /// Creator ID that will be associated with the token
-        #[clap(short, long)]
-        creator_id: Option<String>,
+//         /// Creator ID that will be associated with the token
+//         #[clap(short, long)]
+//         creator_id: Option<String>,
 
-        /// Scope of permissions that the token will have
-        #[clap(short, long, value_parser = clap::value_parser ! (Permission), num_args = 1.., value_delimiter = ',', default_values_t = vec ! [Permission::USE_SELF, Permission::STATUS_SELF, Permission::DELETE_SELF, Permission::UPDATE_SELF])]
-        permission: Vec<Permission>,
-    },
-}
+//         /// Scope of permissions that the token will have
+//         #[clap(short, long, value_parser = clap::value_parser ! (Permission), num_args = 1.., value_delimiter = ',', default_values_t = vec ! [Permission::USE_SELF, Permission::STATUS_SELF, Permission::DELETE_SELF, Permission::UPDATE_SELF])]
+//         permission: Vec<Permission>,
+//     },
+// }
 
 struct AppState {
     db_pool: SqlitePool,
@@ -50,22 +50,22 @@ async fn main() -> Result<()> {
     let auth = Auth::default();
     let state = AppState { db_pool, auth };
 
-    match args.cmd {
-        Commands::GenerateToken {
-            name,
-            permission,
-            creator_id,
-        } => {
-            let client = ApiClient::new(
-                &state.auth,
-                &name,
-                &permission.iter().cloned().collect::<Permission>(),
-                &creator_id,
-                &state.db_pool,
-            )
-            .await?;
-            println!("Generated new API client token:\n{}", &client);
-        }
-    }
+    // match args.cmd {
+    //     Commands::GenerateToken {
+    //         name,
+    //         permission,
+    //         creator_id,
+    //     } => {
+    //         let client = ApiClient::new(
+    //             &state.auth,
+    //             &name,
+    //             &permission.iter().cloned().collect::<Permission>(),
+    //             &creator_id,
+    //             &state.db_pool,
+    //         )
+    //         .await?;
+    //         println!("Generated new API client token:\n{}", &client);
+    //     }
+    // }
     Ok(())
 }

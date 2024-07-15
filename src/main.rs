@@ -48,7 +48,7 @@ use tracing::{error, info, warn};
 use tikv_jemallocator::Jemalloc;
 
 use crate::api::auth::{Auth, AuthToken};
-use crate::api::client::{ApiClient, ApiClientCreateRequest, ApiClientDeleteRequest, Permission};
+use crate::api::client::{ApiClientCreateRequest, ApiClientDeleteRequest, Permission};
 use crate::api::client::{ApiClientStatusRequest, ApiClientUpdateRequest};
 use crate::config::Config;
 use crate::error::ModelRunnerError;
@@ -96,7 +96,7 @@ struct Args {
 #[derive(Debug, Clone, FromRef)]
 struct AppState {
     db_pool: SqlitePool,
-    auth: Auth,
+    // auth: Auth,
 }
 
 lazy_static! {
@@ -139,16 +139,12 @@ lazy_static! {
     static ref WHISPER_MODEL: WhisperModel = WhisperModel::new(
         Api::new().expect("Failed to create API"),
         &ModelBase {
-            name: "Quantized Whisper".into(),
+            name: "Base Whisper".into(),
             license: "MIT".into(),
             domain: ModelDomain::Audio(AudioTask::Transcribe),
-            repo_id: "lmz/candle-whisper".into(),
-            repo_revision: "main".into(),
+            repo_id: "openai/whisper-base".into(),
+            repo_revision: "refs/pr/22".into(),
         },
-        "config-tiny.json",
-        "tokenizer-tiny.json",
-        "model-tiny-q4k.gguf",
-        "melfilters.bytes",
     )
     .map_err(|e| error!("Failed to create Whisper model: {}", e))
     .unwrap();
@@ -264,7 +260,7 @@ async fn main() -> Result<()> {
         .context("Failed to run migrations")?;
     let app_state = AppState {
         db_pool,
-        auth: Auth::default(),
+        // auth: Auth::default(),
     };
 
     let model_router = Router::new().route("/info", post(handle_model_info_request));
@@ -278,21 +274,21 @@ async fn main() -> Result<()> {
         // 10 MB limit
         .layer(DefaultBodyLimit::max(10_000_000));
 
-    let auth_router = Router::new()
-        .route("/status", post(handle_status_request))
-        .route("/create", post(handle_create_request))
-        .route("/delete", post(handle_delete_request))
-        .route("/update", post(handle_update_request));
+    // let auth_router = Router::new()
+    //     .route("/status", post(handle_status_request))
+    //     .route("/create", post(handle_create_request))
+    //     .route("/delete", post(handle_delete_request))
+    //     .route("/update", post(handle_update_request));
 
     let router = Router::new()
         .nest("/model", model_router)
-        .nest("/auth", auth_router)
+        // .nest("/auth", auth_router)
         .nest("/text", text_router)
         .nest("/audio", audio_router)
-        .layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            auth_middleware,
-        ))
+        // .layer(middleware::from_fn_with_state(
+        //     app_state.clone(),
+        //     auth_middleware,
+        // ))
         .route("/health", get(handle_health_request))
         .layer(TraceLayer::new_for_http())
         .layer(middleware::from_fn(track_request))
@@ -361,27 +357,27 @@ async fn shutdown_handler(handle: Handle) {
     }
 }
 
-#[instrument(skip_all)]
-async fn auth_middleware(
-    State(state): State<AppState>,
-    TypedHeader(auth_header): TypedHeader<Authorization<Bearer>>,
-    mut request: Request,
-    next: Next,
-) -> ModelResult<Response> {
-    let client = ApiClient::with_token(
-        &state.auth,
-        AuthToken::from_raw_str(auth_header.token())?,
-        &state.db_pool,
-    )
-    .await
-    .map_err(|_| runner!(StatusCode::UNAUTHORIZED, "Failed to authenticate client"))?;
-    client.has_permission(&Permission::USE_SELF)?;
+// #[instrument(skip_all)]
+// async fn auth_middleware(
+//     State(state): State<AppState>,
+//     TypedHeader(auth_header): TypedHeader<Authorization<Bearer>>,
+//     mut request: Request,
+//     next: Next,
+// ) -> ModelResult<Response> {
+//     let client = ApiClient::with_token(
+//         &state.auth,
+//         AuthToken::from_raw_str(auth_header.token())?,
+//         &state.db_pool,
+//     )
+//     .await
+//     .map_err(|_| runner!(StatusCode::UNAUTHORIZED, "Failed to authenticate client"))?;
+//     client.has_permission(&Permission::USE_SELF)?;
 
-    request.extensions_mut().insert(client);
+//     request.extensions_mut().insert(client);
 
-    info!(monotonic_counter.requests_authorized = 1);
-    Ok(next.run(request).await)
-}
+//     info!(monotonic_counter.requests_authorized = 1);
+//     Ok(next.run(request).await)
+// }
 
 #[tracing::instrument(level = "trace", skip(request))]
 fn get_scheme(request: &Request) -> String {
@@ -425,91 +421,91 @@ async fn handle_health_request() -> ModelResult<StatusCode> {
     Ok(StatusCode::OK)
 }
 
-#[tracing::instrument(level = "trace", skip(req))]
-#[axum_macros::debug_handler]
-async fn handle_status_request(
-    State(state): State<AppState>,
-    Extension(mut client): Extension<ApiClient>,
-    req: Option<Json<ApiClientStatusRequest>>,
-) -> ModelResult<(StatusCode, Json<ApiClient>)> {
-    if let Some(req) = req {
-        client.has_permission(&Permission::STATUS_OTHER)?;
-        client = ApiClient::with_id(req.id.as_str(), &state.db_pool)
-            .await
-            .map_err(|_| {
-                runner!(
-                    StatusCode::NOT_FOUND,
-                    "Failed to find any client matching ID"
-                )
-            })?;
-    } else {
-        client.has_permission(&Permission::STATUS_SELF)?;
-    }
+// #[tracing::instrument(level = "trace", skip(req))]
+// #[axum_macros::debug_handler]
+// async fn handle_status_request(
+//     State(state): State<AppState>,
+//     Extension(mut client): Extension<ApiClient>,
+//     req: Option<Json<ApiClientStatusRequest>>,
+// ) -> ModelResult<(StatusCode, Json<ApiClient>)> {
+//     if let Some(req) = req {
+//         client.has_permission(&Permission::STATUS_OTHER)?;
+//         client = ApiClient::with_id(req.id.as_str(), &state.db_pool)
+//             .await
+//             .map_err(|_| {
+//                 runner!(
+//                     StatusCode::NOT_FOUND,
+//                     "Failed to find any client matching ID"
+//                 )
+//             })?;
+//     } else {
+//         client.has_permission(&Permission::STATUS_SELF)?;
+//     }
 
-    Ok((StatusCode::OK, Json(client)))
-}
+//     Ok((StatusCode::OK, Json(client)))
+// }
 
-#[tracing::instrument(level = "trace", skip())]
-#[axum_macros::debug_handler]
-async fn handle_create_request(
-    State(state): State<AppState>,
-    Extension(client): Extension<ApiClient>,
-    Json(req): Json<ApiClientCreateRequest>,
-) -> ModelResult<(StatusCode, Json<ApiClient>)> {
-    client.has_permission(&Permission::CREATE_SELF)?;
-    let client = ApiClient::new(
-        &state.auth,
-        &req.name,
-        &req.permissions.iter().cloned().collect::<Permission>(),
-        &Some(client.token.id),
-        &state.db_pool,
-    )
-    .await?;
-    Ok((StatusCode::OK, Json(client)))
-}
+// #[tracing::instrument(level = "trace", skip())]
+// #[axum_macros::debug_handler]
+// async fn handle_create_request(
+//     State(state): State<AppState>,
+//     Extension(client): Extension<ApiClient>,
+//     Json(req): Json<ApiClientCreateRequest>,
+// ) -> ModelResult<(StatusCode, Json<ApiClient>)> {
+//     client.has_permission(&Permission::CREATE_SELF)?;
+//     let client = ApiClient::new(
+//         // &state.auth,
+//         &req.name,
+//         &req.permissions.iter().cloned().collect::<Permission>(),
+//         &Some(client.token.id),
+//         &state.db_pool,
+//     )
+//     .await?;
+//     Ok((StatusCode::OK, Json(client)))
+// }
 
-#[tracing::instrument(level = "trace", skip())]
-#[axum_macros::debug_handler]
-async fn handle_delete_request(
-    State(state): State<AppState>,
-    Extension(mut client): Extension<ApiClient>,
-    Json(req): Json<ApiClientDeleteRequest>,
-) -> ModelResult<StatusCode> {
-    client.has_permission(&Permission::DELETE_SELF)?;
-    if req.id != client.token.id {
-        client = ApiClient::with_id(req.id.as_str(), &state.db_pool).await?;
-    }
-    client.delete(&state.db_pool).await?;
-    Ok(StatusCode::OK)
-}
+// #[tracing::instrument(level = "trace", skip())]
+// #[axum_macros::debug_handler]
+// async fn handle_delete_request(
+//     State(state): State<AppState>,
+//     Extension(mut client): Extension<ApiClient>,
+//     Json(req): Json<ApiClientDeleteRequest>,
+// ) -> ModelResult<StatusCode> {
+//     client.has_permission(&Permission::DELETE_SELF)?;
+//     if req.id != client.token.id {
+//         client = ApiClient::with_id(req.id.as_str(), &state.db_pool).await?;
+//     }
+//     client.delete(&state.db_pool).await?;
+//     Ok(StatusCode::OK)
+// }
 
-#[tracing::instrument(level = "trace", skip(req))]
-#[axum_macros::debug_handler]
-async fn handle_update_request(
-    State(state): State<AppState>,
-    Extension(mut client): Extension<ApiClient>,
-    req: Json<ApiClientUpdateRequest>,
-) -> ModelResult<StatusCode> {
-    if let Some(id) = &req.id {
-        if id != &client.token.id {
-            client.has_permission(&Permission::UPDATE_OTHER)?;
-            client = ApiClient::with_id(id.as_str(), &state.db_pool)
-                .await
-                .map_err(|_| runner!(StatusCode::NOT_FOUND, "Failed to find client by ID"))?;
-        }
-    } else {
-        client.has_permission(&Permission::UPDATE_SELF)?;
-    }
+// #[tracing::instrument(level = "trace", skip(req))]
+// #[axum_macros::debug_handler]
+// async fn handle_update_request(
+//     State(state): State<AppState>,
+//     Extension(mut client): Extension<ApiClient>,
+//     req: Json<ApiClientUpdateRequest>,
+// ) -> ModelResult<StatusCode> {
+//     if let Some(id) = &req.id {
+//         if id != &client.token.id {
+//             client.has_permission(&Permission::UPDATE_OTHER)?;
+//             client = ApiClient::with_id(id.as_str(), &state.db_pool)
+//                 .await
+//                 .map_err(|_| runner!(StatusCode::NOT_FOUND, "Failed to find client by ID"))?;
+//         }
+//     } else {
+//         client.has_permission(&Permission::UPDATE_SELF)?;
+//     }
 
-    client
-        .update(
-            &req.name,
-            &req.permissions.iter().cloned().collect::<Permission>(),
-            &state.db_pool,
-        )
-        .await?;
-    Ok(StatusCode::OK)
-}
+//     client
+//         .update(
+//             &req.name,
+//             &req.permissions.iter().cloned().collect::<Permission>(),
+//             &state.db_pool,
+//         )
+//         .await?;
+//     Ok(StatusCode::OK)
+// }
 
 #[tracing::instrument(level = "trace", skip())]
 #[axum_macros::debug_handler]
@@ -578,6 +574,7 @@ async fn handle_instruct_request(
     }
 }
 
+//
 #[tracing::instrument(level = "trace", skip(multipart))]
 #[axum_macros::debug_handler]
 async fn handle_transcribe_request(
