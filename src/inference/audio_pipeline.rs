@@ -83,7 +83,7 @@ impl AudioGeneratorPipeline {
         let vb =
             unsafe { VarBuilder::from_mmaped_safetensors(&[weights_filename], m::DTYPE, &device)? };
         let model = m::model::Whisper::load(&vb, config.clone())?;
-
+        
         let mel_bytes = match config.num_mel_bins {
             80 => include_bytes!("melfilters.bytes").as_slice(),
             128 => include_bytes!("melfilters128.bytes").as_slice(),

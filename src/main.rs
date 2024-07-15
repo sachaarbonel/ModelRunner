@@ -37,6 +37,7 @@ use candle_transformers::models::mixformer;
 use clap::Parser;
 use clap_serde_derive::ClapSerde;
 use hf_hub::api::sync::Api;
+use inference::task::transcribe::TranscribeHandler;
 use lazy_static::lazy_static;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
@@ -62,13 +63,11 @@ use crate::inference::models::model::TextTask;
 use crate::inference::models::openhermes::OpenHermesModel;
 use crate::inference::models::phi::PhiModel;
 use crate::inference::models::stablelm2::StableLm2Model;
-use crate::inference::models::whisper::WhisperModel;
+use crate::inference::models::whisper::WhisperModelInner;
 use crate::inference::task::info::InfoRequest;
 use crate::inference::task::instruct::{InstructHandler, InstructRequest, InstructResponse};
 use crate::inference::task::raw::{RawHandler, RawRequest, RawResponse};
-use crate::inference::task::transcribe::{
-    TranscribeHandler, TranscribeRequest, TranscribeResponse,
-};
+use crate::inference::task::transcribe::{TranscribeRequest, TranscribeResponse};
 use crate::telemetry::init_telemetry;
 
 #[cfg(unix)]
@@ -136,7 +135,7 @@ lazy_static! {
     )
     .map_err(|e| error!("Failed to create Phi3 model: {}", e))
     .unwrap();
-    static ref WHISPER_MODEL: WhisperModel = WhisperModel::new(
+    static ref WHISPER_MODEL: WhisperModelInner = WhisperModelInner::new(
         Api::new().expect("Failed to create API"),
         &ModelBase {
             name: "Base Whisper".into(),
