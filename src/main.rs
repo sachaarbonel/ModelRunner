@@ -138,11 +138,11 @@ lazy_static! {
     static ref WHISPER_MODEL: WhisperModelInner = WhisperModelInner::new(
         Api::new().expect("Failed to create API"),
         &ModelBase {
-            name: "Base Whisper".into(),
+            name: "Medium Whisper".into(),
             license: "MIT".into(),
             domain: ModelDomain::Audio(AudioTask::Transcribe),
-            repo_id: "openai/whisper-base".into(),
-            repo_revision: "refs/pr/22".into(),
+            repo_id: "openai/whisper-medium".into(),
+            repo_revision: "main".into(),
         },
     )
     .map_err(|e| error!("Failed to create Whisper model: {}", e))
