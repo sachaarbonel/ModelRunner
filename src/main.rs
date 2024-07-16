@@ -240,11 +240,11 @@ async fn main() -> Result<()> {
         option_env!("CARGO_PKG_VERSION").unwrap_or("unknown")
     );
     info!(
-        "Supported features: avx: {}, neon: {}, simd128: {}, f16c: {}",
+        "Supported features: avx: {}, neon: {}, simd128: {}, f16c: {}, cuda: {}",
         candle_core::utils::with_avx(),
         candle_core::utils::with_neon(),
         candle_core::utils::with_simd128(),
-        candle_core::utils::with_f16c()
+        candle_core::utils::cuda_is_available(),
     );
 
     let sqlite_options = SqliteConnectOptions::new()
