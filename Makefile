@@ -1,5 +1,3 @@
-# Makefile for Rust project
-
 # Variables
 CARGO := cargo
 BIN_NAME := model_runner
